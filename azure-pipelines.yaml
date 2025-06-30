@@ -1,7 +1,7 @@
 trigger:
   branches:
     include:
-      - '*' # Triggers on all branches, including ec2creation
+      - '*' # Triggers on all branches, including main and ec2creation
 
 pr:
   branches:
@@ -55,7 +55,7 @@ jobs:
     displayName: 'Continuous Deployment - Deploy to AWS'
     dependsOn: CI
     condition: and(succeeded(), or(eq(variables['Build.SourceBranch'], 'refs/heads/main'), eq(variables['Build.SourceBranch'], 'refs/heads/ec2creation')))
-    environment: 'dev' # Name of the environment created in Azure DevOps
+    environment: 'dev' # Environment requiring approval
     pool:
       vmImage: 'ubuntu-latest'
     strategy:
@@ -72,6 +72,7 @@ jobs:
                 regionName: '$(awsRegion)'
                 scriptType: 'inline'
                 inlineScript: |
+                  echo "Deploying stack $(cloudFormationStackName)"
                   aws cloudformation deploy \
                     --template-file $(cloudFormationTemplatePath) \
                     --stack-name $(cloudFormationStackName) \
