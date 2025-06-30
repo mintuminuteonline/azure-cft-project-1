@@ -11,7 +11,7 @@ pr:
 variables:
   awsServiceConnection: 'aws-oidc-federation'
   awsRegion: 'us-east-1'
-  cloudFormationTemplatePath: '$(System.DefaultWorkingDirectory)/azure-cft-project-1/Ec2CFT.yaml'
+  cloudFormationTemplatePath: '$(System.DefaultWorkingDirectory)/Ec2CFT.yaml'
   cloudFormationStackName: 'MyEC2CftStack'
 
 jobs:
