@@ -55,7 +55,7 @@ jobs:
     displayName: 'Continuous Deployment - Deploy to AWS'
     dependsOn: CI
     condition: and(succeeded(), or(eq(variables['Build.SourceBranch'], 'refs/heads/main'), eq(variables['Build.SourceBranch'], 'refs/heads/ec2creation')))
-    environment: 'Production' # Name of the environment created in Azure DevOps
+    environment: 'dev' # Name of the environment created in Azure DevOps
     pool:
       vmImage: 'ubuntu-latest'
     strategy:
