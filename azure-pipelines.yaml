@@ -1,42 +1,49 @@
-# azure-pipelines.yml
 trigger:
-  # CI pipeline auto-triggers on any push to any branch (including local branches)
   branches:
     include:
       - '*' # Triggers on all branches
 
-pr: none # Disable PR triggers if you only want CI on direct push
+pr:
+  branches:
+    include:
+      - main # Run pipeline for PRs targeting main
 
-# Define variables
 variables:
-  # Replace with your AWS service connection name
   awsServiceConnection: 'aws-oidc-federation'
-  awsRegion: 'us-east-1' # Replace with your desired AWS region (e.g., us-east-1, ap-south-1)
-  cloudFormationTemplatePath: 'azure-cft-project-1/Ec2CFT.yaml' # Path to your CFT file
-  cloudFormationStackName: 'MyEC2CftStack' # Name for your CloudFormation stack
+  awsRegion: 'us-east-1'
+  cloudFormationTemplatePath: '$(System.DefaultWorkingDirectory)/azure-cft-project-1/Ec2CFT.yaml'
+ クラウドFormationStackName: 'MyEC2CftStack'
 
 jobs:
 - job: CI
   displayName: 'Continuous Integration - Validate CloudFormation'
   pool:
-    vmImage: 'ubuntu-latest' # Use a Microsoft-hosted agent
+    vmImage: 'ubuntu-latest'
 
   steps:
   - checkout: self
     displayName: 'Checkout Code'
 
-  - task: AwsCloudFormationValidateTemplate@1
+  - script: |
+      if [ ! -f "$(cloudFormationTemplatePath)" ]; then
+        echo "Error: CloudFormation template not found at $(cloudFormationTemplatePath)"
+        exit 1
+      fi
+    displayName: 'Check if CloudFormation Template Exists'
+
+  - task: AWSShellScript@1
     displayName: 'Validate CloudFormation Template'
     inputs:
       awsCredentials: '$(awsServiceConnection)'
       regionName: '$(awsRegion)'
-      templateSource: 'file'
-      templatePath: '$(cloudFormationTemplatePath)'
+      scriptType: 'inline'
+      inlineScript: |
+        aws cloudformation validate-template --template-body file://$(cloudFormationTemplatePath)
 
 - job: CD
   displayName: 'Continuous Deployment - Deploy to AWS'
-  dependsOn: CI # CD job depends on CI job completing successfully
-  condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main')) # Only run CD if CI passed AND the source branch is 'main'
+  dependsOn: CI
+  condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
   pool:
     vmImage: 'ubuntu-latest'
 
@@ -44,20 +51,21 @@ jobs:
   - checkout: self
     displayName: 'Checkout Code for CD'
 
-  - task: AwsCloudFormationCreateUpdateStack@1
+  - script: |
+      echo "Deploying CloudFormation stack: $(cloudFormationStackName)"
+      echo "Template Path: $(cloudFormationTemplatePath)"
+      echo "AWS Region: $(awsRegion)"
+    displayName: 'Log Deployment Details'
+
+  - task: AWSShellScript@1
     displayName: 'Create/Update CloudFormation Stack'
     inputs:
       awsCredentials: '$(awsServiceConnection)'
       regionName: '$(awsRegion)'
-      stackName: '$(cloudFormationStackName)'
-      templateSource: 'file'
-      templatePath: '$(cloudFormationTemplatePath)'
-      # Parameters (if any, in JSON format - example for a parameter called 'Environment')
-      # templateParameters: '[{"ParameterKey": "Environment", "ParameterValue": "Production"}]'
-      # You can also pass capabilities if your template creates IAM roles, etc.
-      # capabilities: 'CAPABILITY_IAM,CAPABILITY_NAMED_IAM'
-      # Tags for your stack
-      # tags: '[{"Key": "Project", "Value": "AzureCFT"}]'
-      # Add other CloudFormation specific inputs as needed (e.g., roleArn, notificationARNs, etc.)
-      # If you want to delete the stack if the pipeline fails, set 'onFailure'
-      # onFailure: 'DELETE_STACK'
+      scriptType: 'inline'
+      inlineScript: |
+        aws cloudformation deploy \
+          --template-file $(cloudFormationTemplatePath) \
+          --stack-name $(cloudFormationStackName) \
+          --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
+          --no-fail-on-empty-changeset
