@@ -1,12 +1,12 @@
 trigger:
   branches:
     include:
-      - '*' # Triggers on all branches
+      - '*' # Triggers on all branches, including ec2creation
 
 pr:
   branches:
     include:
-      - main # Run pipeline for PRs targeting main
+      - main # Run for PRs targeting main
 
 variables:
   awsServiceConnection: 'aws-oidc-federation'
@@ -15,57 +15,65 @@ variables:
   cloudFormationStackName: 'MyEC2CftStack'
 
 jobs:
-- job: CI
-  displayName: 'Continuous Integration - Validate CloudFormation'
-  pool:
-    vmImage: 'ubuntu-latest'
+  - job: CI
+    displayName: 'Continuous Integration - Validate CloudFormation'
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+      - checkout: self
+        displayName: 'Checkout Code'
 
-  steps:
-  - checkout: self
-    displayName: 'Checkout Code'
+      - script: |
+          echo "Current working directory: $(System.DefaultWorkingDirectory)"
+          echo "Listing all files in repository:"
+          ls -la $(System.DefaultWorkingDirectory)
+          echo "Checking for Ec2CFT.yaml in root:"
+          ls -la $(System.DefaultWorkingDirectory)/Ec2CFT.yaml || echo "File not found"
+        displayName: 'Debug: List Repository Files'
 
-  - script: |
-      if [ ! -f "$(cloudFormationTemplatePath)" ]; then
-        echo "Error: CloudFormation template not found at $(cloudFormationTemplatePath)"
-        exit 1
-      fi
-    displayName: 'Check if CloudFormation Template Exists'
+      - script: |
+          if [ ! -f "$(cloudFormationTemplatePath)" ]; then
+            echo "Error: CloudFormation template not found at $(cloudFormationTemplatePath)"
+            exit 1
+          fi
+        displayName: 'Check if CloudFormation Template Exists'
 
-  - task: AWSShellScript@1
-    displayName: 'Validate CloudFormation Template'
-    inputs:
-      awsCredentials: '$(awsServiceConnection)'
-      regionName: '$(awsRegion)'
-      scriptType: 'inline'
-      inlineScript: |
-        aws cloudformation validate-template --template-body file://$(cloudFormationTemplatePath)
+      - task: AWSShellScript@1
+        displayName: 'Validate CloudFormation Template'
+        inputs:
+          awsCredentials: '$(awsServiceConnection)'
+          regionName: '$(awsRegion)'
+          scriptType: 'inline'
+          inlineScript: |
+            echo "Validating template at $(cloudFormationTemplatePath)"
+            aws cloudformation validate-template --template-body file://$(cloudFormationTemplatePath) || {
+              echo "Validation failed. Error details above."
+              exit 1
+            }
 
-- job: CD
-  displayName: 'Continuous Deployment - Deploy to AWS'
-  dependsOn: CI
-  condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
-  pool:
-    vmImage: 'ubuntu-latest'
+  - deployment: CD
+    displayName: 'Continuous Deployment - Deploy to AWS'
+    dependsOn: CI
+    condition: and(succeeded(), or(eq(variables['Build.SourceBranch'], 'refs/heads/main'), eq(variables['Build.SourceBranch'], 'refs/heads/ec2creation')))
+    environment: 'Production' # Name of the environment created in Azure DevOps
+    pool:
+      vmImage: 'ubuntu-latest'
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+            - checkout: self
+              displayName: 'Checkout Code for CD'
 
-  steps:
-  - checkout: self
-    displayName: 'Checkout Code for CD'
-
-  - script: |
-      echo "Deploying CloudFormation stack: $(cloudFormationStackName)"
-      echo "Template Path: $(cloudFormationTemplatePath)"
-      echo "AWS Region: $(awsRegion)"
-    displayName: 'Log Deployment Details'
-
-  - task: AWSShellScript@1
-    displayName: 'Create/Update CloudFormation Stack'
-    inputs:
-      awsCredentials: '$(awsServiceConnection)'
-      regionName: '$(awsRegion)'
-      scriptType: 'inline'
-      inlineScript: |
-        aws cloudformation deploy \
-          --template-file $(cloudFormationTemplatePath) \
-          --stack-name $(cloudFormationStackName) \
-          --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
-          --no-fail-on-empty-changeset
+            - task: AWSShellScript@1
+              displayName: 'Create/Update CloudFormation Stack'
+              inputs:
+                awsCredentials: '$(awsServiceConnection)'
+                regionName: '$(awsRegion)'
+                scriptType: 'inline'
+                inlineScript: |
+                  aws cloudformation deploy \
+                    --template-file $(cloudFormationTemplatePath) \
+                    --stack-name $(cloudFormationStackName) \
+                    --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
+                    --no-fail-on-empty-changeset
