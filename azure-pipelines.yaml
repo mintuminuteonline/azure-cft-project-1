@@ -1,0 +1,63 @@
+# azure-pipelines.yml
+trigger:
+  # CI pipeline auto-triggers on any push to any branch (including local branches)
+  branches:
+    include:
+      - '*' # Triggers on all branches
+
+pr: none # Disable PR triggers if you only want CI on direct push
+
+# Define variables
+variables:
+  # Replace with your AWS service connection name
+  awsServiceConnection: 'aws-oidc-federation'
+  awsRegion: 'us-east-1' # Replace with your desired AWS region (e.g., us-east-1, ap-south-1)
+  cloudFormationTemplatePath: 'azure-cft-project-1/Ec2CFT.yaml' # Path to your CFT file
+  cloudFormationStackName: 'MyEC2CftStack' # Name for your CloudFormation stack
+
+jobs:
+- job: CI
+  displayName: 'Continuous Integration - Validate CloudFormation'
+  pool:
+    vmImage: 'ubuntu-latest' # Use a Microsoft-hosted agent
+
+  steps:
+  - checkout: self
+    displayName: 'Checkout Code'
+
+  - task: AwsCloudFormationValidateTemplate@1
+    displayName: 'Validate CloudFormation Template'
+    inputs:
+      awsCredentials: '$(awsServiceConnection)'
+      regionName: '$(awsRegion)'
+      templateSource: 'file'
+      templatePath: '$(cloudFormationTemplatePath)'
+
+- job: CD
+  displayName: 'Continuous Deployment - Deploy to AWS'
+  dependsOn: CI # CD job depends on CI job completing successfully
+  condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main')) # Only run CD if CI passed AND the source branch is 'main'
+  pool:
+    vmImage: 'ubuntu-latest'
+
+  steps:
+  - checkout: self
+    displayName: 'Checkout Code for CD'
+
+  - task: AwsCloudFormationCreateUpdateStack@1
+    displayName: 'Create/Update CloudFormation Stack'
+    inputs:
+      awsCredentials: '$(awsServiceConnection)'
+      regionName: '$(awsRegion)'
+      stackName: '$(cloudFormationStackName)'
+      templateSource: 'file'
+      templatePath: '$(cloudFormationTemplatePath)'
+      # Parameters (if any, in JSON format - example for a parameter called 'Environment')
+      # templateParameters: '[{"ParameterKey": "Environment", "ParameterValue": "Production"}]'
+      # You can also pass capabilities if your template creates IAM roles, etc.
+      # capabilities: 'CAPABILITY_IAM,CAPABILITY_NAMED_IAM'
+      # Tags for your stack
+      # tags: '[{"Key": "Project", "Value": "AzureCFT"}]'
+      # Add other CloudFormation specific inputs as needed (e.g., roleArn, notificationARNs, etc.)
+      # If you want to delete the stack if the pipeline fails, set 'onFailure'
+      # onFailure: 'DELETE_STACK'
