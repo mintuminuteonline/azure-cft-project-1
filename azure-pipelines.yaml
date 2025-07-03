@@ -1,0 +1,80 @@
+trigger:
+  branches:
+    include:
+      - '*' # Triggers on all branches, including main and ec2creation
+
+pr:
+  branches:
+    include:
+      - main # Run for PRs targeting main
+
+variables:
+  awsServiceConnection: 'aws-oidc-federation'
+  awsRegion: 'us-east-1'
+  cloudFormationTemplatePath: '$(System.DefaultWorkingDirectory)/Ec2CFT.yaml'
+  cloudFormationStackName: 'MyEC2CftStack'
+
+jobs:
+  - job: CI
+    displayName: 'Continuous Integration - Validate CloudFormation'
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+      - checkout: self
+        displayName: 'Checkout Code'
+
+      - script: |
+          echo "Current working directory: $(System.DefaultWorkingDirectory)"
+          echo "Listing all files in repository:"
+          ls -la $(System.DefaultWorkingDirectory)
+          echo "Checking for Ec2CFT.yaml in root:"
+          ls -la $(System.DefaultWorkingDirectory)/Ec2CFT.yaml || echo "File not found"
+        displayName: 'Debug: List Repository Files'
+
+      - script: |
+          if [ ! -f "$(cloudFormationTemplatePath)" ]; then
+            echo "Error: CloudFormation template not found at $(cloudFormationTemplatePath)"
+            exit 1
+          fi
+        displayName: 'Check if CloudFormation Template Exists'
+
+      - task: AWSShellScript@1
+        displayName: 'Validate CloudFormation Template'
+        inputs:
+          awsCredentials: '$(awsServiceConnection)'
+          regionName: '$(awsRegion)'
+          scriptType: 'inline'
+          inlineScript: |
+            echo "Validating template at $(cloudFormationTemplatePath)"
+            aws cloudformation validate-template --template-body file://$(cloudFormationTemplatePath) || {
+              echo "Validation failed. Error details above."
+              exit 1
+            }
+
+  - deployment: CD
+    displayName: 'Continuous Deployment - Deploy to AWS'
+    dependsOn: CI
+    condition: and(succeeded(), or(eq(variables['Build.SourceBranch'], 'refs/heads/main'), eq(variables['Build.SourceBranch'], 'refs/heads/ec2creation')))
+    environment: 'dev' # Environment requiring approval
+    pool:
+      vmImage: 'ubuntu-latest'
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+            - checkout: self
+              displayName: 'Checkout Code for CD'
+
+            - task: AWSShellScript@1
+              displayName: 'Create/Update CloudFormation Stack'
+              inputs:
+                awsCredentials: '$(awsServiceConnection)'
+                regionName: '$(awsRegion)'
+                scriptType: 'inline'
+                inlineScript: |
+                  echo "Deploying stack $(cloudFormationStackName)"
+                  aws cloudformation deploy \
+                    --template-file $(cloudFormationTemplatePath) \
+                    --stack-name $(cloudFormationStackName) \
+                    --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
+                    --no-fail-on-empty-changeset

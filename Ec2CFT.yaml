@@ -1,0 +1,99 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: Creates a VPC, subnet, route table, security group, and EC2 instance
+
+Resources:
+  MyEc2Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: ami-05ffe3c48a9991133  
+      InstanceType: t2.micro
+      KeyName: cfn-keypair  
+      SecurityGroupIds: 
+        - !Ref SSHSecuritygroup
+      SubnetId: !Ref MyPublicSubnet
+  
+  SSHSecuritygroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow ssh connection to our instance
+      VpcId: !Ref MyVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+
+  MyVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      Tags:
+        - Key: Name
+          Value: my-vpc
+
+  MyInternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: my-igw
+
+  AttachGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref MyVPC
+      InternetGatewayId: !Ref MyInternetGateway
+
+  MyPublicSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref MyVPC
+      CidrBlock: 10.0.1.0/24
+      AvailabilityZone: us-east-1a
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: my-public-subnet
+
+  MyRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref MyVPC
+      Tags:
+        - Key: Name
+          Value: my-public-route-table
+
+  PublicRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref MyRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref MyInternetGateway
+
+  SubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref MyPublicSubnet
+      RouteTableId: !Ref MyRouteTable
+
+Outputs:
+  SecurityGroupId:
+    Description: ID of the created Security Group
+    Value: !Ref SSHSecuritygroup
+  EC2InstanceId:
+    Description: ID of the EC2 Instance
+    Value: !Ref MyEc2Instance
+  VpcId:
+    Description: ID of the created VPC
+    Value: !Ref MyVPC
+  SubnetId:
+    Description: ID of the public subnet
+    Value: !Ref MyPublicSubnet
+  RouteTableId:
+    Description: ID of the route table
+    Value: !Ref MyRouteTable
+  InternetGatewayId:
+    Description: ID of the Internet Gateway
+    Value: !Ref MyInternetGateway
